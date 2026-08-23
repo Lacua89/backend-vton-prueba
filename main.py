@@ -3,6 +3,7 @@ from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from gradio_client import Client, handle_file
+from PIL import Image
 
 app = FastAPI()
 
@@ -30,9 +31,9 @@ async def try_on(
         persona_path = "temp_person.jpg"
         top_path = "temp_top.jpg"
         bottom_path = "temp_bottom.jpg"
-        result_top_path = "temp_result_top.jpg"
+        combined_path = "temp_outfit_combined.jpg"
         
-        # Guardar archivos recibidos desde Flutter
+        # 1. Guardar archivos recibidos desde Flutter
         with open(persona_path, "wb") as f:
             f.write(await foto_persona.read())
         with open(top_path, "wb") as f:
@@ -40,17 +41,43 @@ async def try_on(
         with open(bottom_path, "wb") as f:
             f.write(await prenda_bottom.read())
 
+        # 2. Combinar prendas verticalmente con PIL (Top arriba, Bottom abajo)
+        top_img = Image.open(top_path).convert("RGB")
+        bottom_img = Image.open(bottom_path).convert("RGB")
+
+        # Ajustar anchos para que ambas imágenes coincidan exactamente
+        target_width = max(top_img.width, bottom_img.width)
+        
+        if top_img.width != target_width:
+            new_height = int(top_img.height * (target_width / top_img.width))
+            top_img = top_img.resize((target_width, new_height), Image.Resampling.LANCZOS)
+            
+        if bottom_img.width != target_width:
+            new_height = int(bottom_img.height * (target_width / bottom_img.width))
+            bottom_img = bottom_img.resize((target_width, new_height), Image.Resampling.LANCZOS)
+
+        # Crear lienzo único combinando ambas prendas
+        total_height = top_img.height + bottom_img.height
+        combined_outfit = Image.new("RGB", (target_width, total_height), (255, 255, 255))
+        
+        combined_outfit.paste(top_img, (0, 0))
+        combined_outfit.paste(bottom_img, (0, top_img.height))
+        
+        # Guardar la imagen combinada
+        combined_outfit.save(combined_path, "JPEG", quality=95)
+
+        # 3. Conexión a la API de IDM-VTON
         client = Client("yisol/IDM-VTON", token=hf_token)
 
-        # --- PASO 1: Vestir la prenda superior (Top) ---
-        res_top = client.predict(
+        # 4. Procesamiento en un solo paso pasando el outfit completo
+        res = client.predict(
             dict={
                 "background": handle_file(persona_path),
                 "layers": [],
                 "composite": handle_file(persona_path)
             },
-            garm_img=handle_file(top_path),
-            garment_des="upper body clothing",
+            garm_img=handle_file(combined_path),
+            garment_des="overall outfit with top and bottom clothing",
             is_checked=True,
             is_checked_crop=False,
             denoise_steps=30,
@@ -58,27 +85,9 @@ async def try_on(
             api_name="/tryon"
         )
 
-        out_top_path = res_top[0] if isinstance(res_top, (list, tuple)) else res_top
+        final_path = res[0] if isinstance(res, (list, tuple)) else res
 
-        # --- PASO 2: Vestir la prenda inferior (Bottom) sobre el resultado del Top ---
-        res_bottom = client.predict(
-            dict={
-                "background": handle_file(out_top_path),
-                "layers": [],
-                "composite": handle_file(out_top_path)
-            },
-            garm_img=handle_file(bottom_path),
-            garment_des="lower body clothing",
-            is_checked=True,
-            is_checked_crop=False,
-            denoise_steps=30,
-            seed=42,
-            api_name="/tryon"
-        )
-
-        final_path = res_bottom[0] if isinstance(res_bottom, (list, tuple)) else res_bottom
-
-        # Leer y devolver la imagen final combinada
+        # 5. Leer y retornar la imagen procesada
         with open(final_path, "rb") as f:
             image_bytes = f.read()
 
