@@ -1,0 +1,10 @@
+--find-links https://download.pytorch.org/whl/cpu/torch_stable.html
+torch==2.2.1+cpu
+fastapi==0.110.0
+uvicorn==0.28.0
+python-multipart==0.0.9
+gradio_client==0.15.0
+mediapipe==0.10.11
+opencv-python-headless==4.9.0.80
+pillow==10.2.0
+numpy==1.26.4
