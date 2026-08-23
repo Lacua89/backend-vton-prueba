@@ -1,5 +1,5 @@
 import os
-from fastapi import FastAPI, File, UploadFile, HTTPException, Form
+from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from gradio_client import Client, handle_file
@@ -22,9 +22,7 @@ def read_root():
 async def try_on(
     foto_persona: UploadFile = File(...),
     prenda_top: UploadFile = File(...),
-    prenda_bottom: UploadFile = File(...),
-    categoria: str = Form("tops"),
-    talle_largo: bool = Form(False)
+    prenda_bottom: UploadFile = File(...)
 ):
     try:
         hf_token = os.getenv("HF_TOKEN")
@@ -37,27 +35,19 @@ async def try_on(
         with open(top_path, "wb") as f:
             f.write(await prenda_top.read())
 
-        # Se utiliza 'token' en lugar de 'hf_token' para compatibilidad con gradio_client >= 1.0
-        client = Client("fashn-ai/fashn-vton-1-5", token=hf_token)
+        # Conexión al Space activo de Kolors
+        client = Client("Kwai-Kolors/Kolors-Virtual-Try-On", token=hf_token)
 
+        # Llamada a la API oficial de Kolors
         result = client.predict(
-            model_image=handle_file(persona_path),
-            garment_image=handle_file(top_path),
-            category=categoria,
-            nsfw_filter=True,
-            cover_feet=False,
-            adjust_hands=True,
-            restore_background=True,
-            restore_clothes=False,
-            long_top=talle_largo,
-            guidance_scale=2.5,
-            timesteps=30,
-            seed=42,
-            num_samples=1,
-            api_name="/process_tryon"
+            person_img=handle_file(persona_path),
+            garment_img=handle_file(top_path),
+            seed=0,
+            randomize_seed=True,
+            api_name="/try_on"
         )
 
-        image_path = result[0]['image'] if isinstance(result, list) else result
+        image_path = result[0] if isinstance(result, (list, tuple)) else result
 
         with open(image_path, "rb") as f:
             image_bytes = f.read()
