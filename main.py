@@ -1,5 +1,5 @@
 import os
-from fastapi import FastAPI, File, UploadFile, HTTPException, Form
+from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from gradio_client import Client, handle_file
@@ -33,7 +33,7 @@ async def try_on(
         bottom_path = "temp_bottom.jpg"
         combined_path = "temp_outfit_combined.jpg"
         
-        # 1. Guardar archivos recibidos
+        # 1. Guardar archivos
         with open(persona_path, "wb") as f:
             f.write(await foto_persona.read())
         with open(top_path, "wb") as f:
@@ -41,7 +41,7 @@ async def try_on(
         with open(bottom_path, "wb") as f:
             f.write(await prenda_bottom.read())
 
-        # 2. Combinar ambas prendas verticalmente
+        # 2. Combinar ambas prendas verticalmente con PIL
         top_img = Image.open(top_path).convert("RGB")
         bottom_img = Image.open(bottom_path).convert("RGB")
 
@@ -62,10 +62,10 @@ async def try_on(
         combined_outfit.paste(bottom_img, (0, top_img.height))
         combined_outfit.save(combined_path, "JPEG", quality=95)
 
-        # 3. Conexión al Space Nymbo/Virtual-Try-On (Soporta Overall / Full Body)
-        client = Client("Nymbo/Virtual-Try-On", token=hf_token)
+        # 3. Conexión al Space oficial activo IDM-VTON
+        client = Client("yisol/IDM-VTON", token=hf_token)
 
-        # Se envía con la categoría "overall" para forzar el reemplazo de piernas y torso
+        # 4. Procesar con la etiqueta explícita de "overall" / ropa completa
         res = client.predict(
             dict={
                 "background": handle_file(persona_path),
@@ -73,12 +73,11 @@ async def try_on(
                 "composite": handle_file(persona_path)
             },
             garm_img=handle_file(combined_path),
-            garment_des="full outfit top and bottom",
+            garment_des="overall dress outfit including top shirt and bottom pants",
             is_checked=True,
             is_checked_crop=False,
             denoise_steps=30,
             seed=42,
-            category="overall",
             api_name="/tryon"
         )
 
