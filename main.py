@@ -29,44 +29,57 @@ async def try_on(
         
         persona_path = "temp_person.jpg"
         top_path = "temp_top.jpg"
+        bottom_path = "temp_bottom.jpg"
+        result_top_path = "temp_result_top.jpg"
         
+        # Guardar archivos recibidos desde Flutter
         with open(persona_path, "wb") as f:
             f.write(await foto_persona.read())
         with open(top_path, "wb") as f:
             f.write(await prenda_top.read())
+        with open(bottom_path, "wb") as f:
+            f.write(await prenda_bottom.read())
 
-        # Conexión al Space Kwai-Kolors
-        client = Client("Kwai-Kolors/Kolors-Virtual-Try-On", token=hf_token)
+        client = Client("yisol/IDM-VTON", token=hf_token)
 
-        # Usamos fn_index=1 que corresponde al botón de procesamiento principal
-        result = client.predict(
-            person_img=handle_file(persona_path),
-            garment_img=handle_file(top_path),
-            seed=0,
-            randomize_seed=True,
-            fn_index=1
+        # --- PASO 1: Vestir la prenda superior (Top) ---
+        res_top = client.predict(
+            dict={
+                "background": handle_file(persona_path),
+                "layers": [],
+                "composite": handle_file(persona_path)
+            },
+            garm_img=handle_file(top_path),
+            garment_des="upper body clothing",
+            is_checked=True,
+            is_checked_crop=False,
+            denoise_steps=30,
+            seed=42,
+            api_name="/tryon"
         )
 
-        print(f"Respuesta cruda de Gradio: {result}")
+        out_top_path = res_top[0] if isinstance(res_top, (list, tuple)) else res_top
 
-        # Extracción de la ruta de la imagen
-        image_path = None
+        # --- PASO 2: Vestir la prenda inferior (Bottom) sobre el resultado del Top ---
+        res_bottom = client.predict(
+            dict={
+                "background": handle_file(out_top_path),
+                "layers": [],
+                "composite": handle_file(out_top_path)
+            },
+            garm_img=handle_file(bottom_path),
+            garment_des="lower body clothing",
+            is_checked=True,
+            is_checked_crop=False,
+            denoise_steps=30,
+            seed=42,
+            api_name="/tryon"
+        )
 
-        if isinstance(result, (list, tuple)) and len(result) > 0:
-            item = result[0]
-            if isinstance(item, dict) and "image" in item:
-                image_path = item["image"]
-            elif isinstance(item, str):
-                image_path = item
-        elif isinstance(result, dict) and "image" in result:
-            image_path = result["image"]
-        elif isinstance(result, str):
-            image_path = result
+        final_path = res_bottom[0] if isinstance(res_bottom, (list, tuple)) else res_bottom
 
-        if not image_path or not os.path.exists(str(image_path)):
-            raise Exception(f"No se pudo obtener la imagen del modelo. Respuesta: {result}")
-
-        with open(image_path, "rb") as f:
+        # Leer y devolver la imagen final combinada
+        with open(final_path, "rb") as f:
             image_bytes = f.read()
 
         return Response(content=image_bytes, media_type="image/jpeg")
