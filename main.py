@@ -33,7 +33,7 @@ async def try_on(
         bottom_path = "temp_bottom.jpg"
         combined_path = "temp_outfit_combined.jpg"
         
-        # 1. Guardar archivos
+        # 1. Guardar archivos de entrada
         with open(persona_path, "wb") as f:
             f.write(await foto_persona.read())
         with open(top_path, "wb") as f:
@@ -41,7 +41,7 @@ async def try_on(
         with open(bottom_path, "wb") as f:
             f.write(await prenda_bottom.read())
 
-        # 2. Unir imágenes con PIL
+        # 2. Combinar ambas prendas verticalmente con PIL
         top_img = Image.open(top_path).convert("RGB")
         bottom_img = Image.open(bottom_path).convert("RGB")
 
@@ -61,13 +61,14 @@ async def try_on(
         combined_outfit.paste(bottom_img, (0, top_img.height))
         combined_outfit.save(combined_path, "JPEG", quality=95)
 
-        # 3. Llamada a Cat-VTON (Soporta sustitución de cuerpo completo)
-        client = Client("zhengchong/Cat-VTON", token=hf_token)
+        # 3. Conexión al Space activo xiaozaa/cat-vton
+        client = Client("xiaozaa/cat-vton", token=hf_token)
 
+        # 4. Llamada pasando cloth_type="overall" para abarcar torso y piernas
         res = client.predict(
-            image=handle_file(persona_path),
-            garm_img=handle_file(combined_path),
-            cloth_type="overall",  # Permite vestir torso y piernas sin cortar en cintura
+            person_image=handle_file(persona_path),
+            garment_image=handle_file(combined_path),
+            cloth_type="overall",
             num_inference_steps=30,
             guidance_scale=2.5,
             seed=42,
