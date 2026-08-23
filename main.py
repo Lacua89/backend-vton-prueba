@@ -16,7 +16,7 @@ app.add_middleware(
 
 @app.get("/")
 def read_root():
-    return {"status": "ok", "message": "API VTON Gratis Activa (Paso 1 + Paso 2)"}
+    return {"status": "ok", "message": "API VTON Gratis Activa (IDM + OOTDiffusion)"}
 
 @app.post("/api/v1/try-on-completo")
 async def try_on(
@@ -42,7 +42,7 @@ async def try_on(
         # -------------------------------------------------------------
         # PASO 1: Vestir la prenda Superior (Top) usando IDM-VTON
         # -------------------------------------------------------------
-        print("Iniciando Paso 1: Procesando Prenda Superior...")
+        print("Iniciando Paso 1: Procesando Prenda Superior con IDM-VTON...")
         client_top = Client("yisol/IDM-VTON", token=hf_token)
 
         res_top = client_top.predict(
@@ -64,22 +64,27 @@ async def try_on(
         print(f"Paso 1 completado. Resultado guardado en: {top_result_path}")
 
         # -------------------------------------------------------------
-        # PASO 2: Vestir la prenda Inferior (Bottom) usando Kolors-VTON
+        # PASO 2: Vestir la prenda Inferior (Bottom) usando OOTDiffusion
         # -------------------------------------------------------------
-        print("Iniciando Paso 2: Procesando Prenda Inferior...")
-        client_bottom = Client("Kwai-Kolors/Kolors-Virtual-Try-On", token=hf_token)
+        print("Iniciando Paso 2: Procesando Prenda Inferior con OOTDiffusion...")
+        client_bottom = Client("levihsu/OOTDiffusion", token=hf_token)
 
         res_bottom = client_bottom.predict(
-            person_img=handle_file(top_result_path),
-            garment_img=handle_file(bottom_path),
-            seed=0,
-            randomize_seed=True
+            vton_img=handle_file(top_result_path),
+            garm_img=handle_file(bottom_path),
+            category="lower_body",  # Forzar segmentación en la zona inferior/pantalón
+            n_samples=1,
+            n_steps=20,
+            image_scale=2.0,
+            seed=42,
+            api_name="/process_dc"  # Endpoint especializado en prendas inferiores / vestidos
         )
 
+        # OOTDiffusion devuelve una lista de imágenes generadas
         final_path = res_bottom[0] if isinstance(res_bottom, (list, tuple)) else res_bottom
         print("Paso 2 completado exitosamente.")
 
-        # 3. Leer y responder con la foto con ambas prendas aplicadas
+        # 3. Leer y devolver el resultado final
         with open(final_path, "rb") as f:
             image_bytes = f.read()
 
