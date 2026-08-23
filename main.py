@@ -23,12 +23,11 @@ async def try_on(
     foto_persona: UploadFile = File(...),
     prenda_top: UploadFile = File(...),
     prenda_bottom: UploadFile = File(...),
-    # Opcionales para talle y ajustes
-    categoria: str = Form("tops"),       # 'tops', 'bottoms' o 'dresses'
-    talle_largo: bool = Form(False)      # True si es prenda holgada/larga
+    categoria: str = Form("tops"),
+    talle_largo: bool = Form(False)
 ):
     try:
-        token = os.getenv("HF_TOKEN")
+        hf_token = os.getenv("HF_TOKEN")
         
         persona_path = "temp_person.jpg"
         top_path = "temp_top.jpg"
@@ -38,19 +37,19 @@ async def try_on(
         with open(top_path, "wb") as f:
             f.write(await prenda_top.read())
 
-        client = Client("fashn-ai/fashn-vton-1-5", hf_token=token)
+        # Se utiliza 'token' en lugar de 'hf_token' para compatibilidad con gradio_client >= 1.0
+        client = Client("fashn-ai/fashn-vton-1-5", token=hf_token)
 
-        # Llamada con protección de rostro y parámetros de talle
         result = client.predict(
             model_image=handle_file(persona_path),
             garment_image=handle_file(top_path),
-            category=categoria,          # Control de talle/tipo
+            category=categoria,
             nsfw_filter=True,
             cover_feet=False,
-            adjust_hands=True,           # Ajuste de manos frente a la prenda
-            restore_background=True,     # PROTECCIÓN DE ROSTRO Y FONDO ORIGINAL
+            adjust_hands=True,
+            restore_background=True,
             restore_clothes=False,
-            long_top=talle_largo,        # Ajuste para prendas largas/holgadas
+            long_top=talle_largo,
             guidance_scale=2.5,
             timesteps=30,
             seed=42,
