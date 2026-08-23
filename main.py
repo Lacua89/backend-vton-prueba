@@ -1,6 +1,6 @@
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import FileResponse
-from gradio_client import Client, handle_file
+from gradio_client import Client
 import shutil
 import uuid
 import os
@@ -16,7 +16,7 @@ OS_TEMP_DIR = "./temp"
 os.makedirs(OS_TEMP_DIR, exist_ok=True)
 
 HF_SPACE_URL = "fashn-ai/fashn-vton-1.5"
-HF_TOKEN = None  # Agrega tu token si lo deseas: "hf_xxxxxxxxxxxxxxxxxxxx"
+HF_TOKEN = None  # Ejemplo: "hf_xxxxxxxxxxxxxxxxxxxx"
 
 
 # ==========================================
@@ -78,13 +78,13 @@ async def try_on_completo(
         # A. Crear la máscara del rostro para protección al final
         mascara_rostro = obtener_mascara_rostro(persona_orig)
 
-        # B. Conectar con Hugging Face
+        # B. Conectar con Hugging Face (pasando el token si existe)
         client = Client(HF_SPACE_URL, hf_token=HF_TOKEN)
 
         # C. PASO 1: Procesar Prenda Superior (Top)
         res_step1_path = client.predict(
-            model_input={"background": handle_file(persona_path), "layers": [], "composite": None},
-            garm_img=handle_file(top_path),
+            model_input={"background": persona_path, "layers": [], "composite": None},
+            garm_img=top_path,
             garment_des="top",
             is_checked=True,
             is_checked_crop=False,
@@ -93,10 +93,10 @@ async def try_on_completo(
             api_name="/process"
         )
 
-        # D. PASO 2: Procesar Prenda Inferior (Bottom) sobre la imagen del Paso 1
+        # D. PASO 2: Procesar Prenda Inferior (Bottom) usando el resultado del Paso 1
         res_step2_path = client.predict(
-            model_input={"background": handle_file(res_step1_path), "layers": [], "composite": None},
-            garm_img=handle_file(bottom_path),
+            model_input={"background": res_step1_path, "layers": [], "composite": None},
+            garm_img=bottom_path,
             garment_des="bottom",
             is_checked=True,
             is_checked_crop=False,
