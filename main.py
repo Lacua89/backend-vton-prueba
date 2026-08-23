@@ -72,15 +72,14 @@ async def try_on(
         res_bottom = client_bottom.predict(
             vton_img=handle_file(top_result_path),
             garm_img=handle_file(bottom_path),
-            category="lower_body",  # Forzar segmentación en la zona inferior/pantalón
+            category="Lower-body",  # Nombre exacto requerido por la lista de opciones
             n_samples=1,
             n_steps=20,
             image_scale=2.0,
             seed=42,
-            api_name="/process_dc"  # Endpoint especializado en prendas inferiores / vestidos
+            api_name="/process_dc"
         )
 
-        # OOTDiffusion devuelve una lista de imágenes generadas
         final_path = res_bottom[0] if isinstance(res_bottom, (list, tuple)) else res_bottom
         print("Paso 2 completado exitosamente.")
 
