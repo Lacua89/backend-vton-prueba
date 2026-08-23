@@ -1,117 +1,70 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException
-from fastapi.responses import FileResponse
-from gradio_client import Client
-import shutil
-import uuid
 import os
-import torch
-import numpy as np
-import cv2
-from PIL import Image, ImageFilter
-import mediapipe as mp
+from fastapi import FastAPI, File, UploadFile, HTTPException, Form
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
+from gradio_client import Client, handle_file
 
-app = FastAPI(title="API VTON Avanzada Gratis")
+app = FastAPI()
 
-OS_TEMP_DIR = "./temp"
-os.makedirs(OS_TEMP_DIR, exist_ok=True)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-HF_SPACE_URL = "fashn-ai/fashn-vton-1.5"
-HF_TOKEN = None  # Ejemplo: "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"
-
-
-# ==========================================
-# 1. MÁSCARA DEL ROSTRO (MEDIAPIPE)
-# ==========================================
-def obtener_mascara_rostro(imagen_pil):
-    """Detecta el rostro/cabello para no distorsionarlo."""
-    img_np = np.array(imagen_pil)
-    h, w, _ = img_np.shape
-    mask = np.zeros((h, w), dtype=np.uint8)
-    
-    mp_face = mp.solutions.face_mesh
-    with mp_face.FaceMesh(static_image_mode=True, max_num_faces=1) as face_mesh:
-        results = face_mesh.process(cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR))
-        if results.multi_face_landmarks:
-            for face_landmarks in results.multi_face_landmarks:
-                points = [[int(lm.x * w), int(lm.y * h)] for lm in face_landmarks.landmark]
-                hull = cv2.convexHull(np.array(points))
-                cv2.fillConvexPoly(mask, hull, 255)
-                
-    if np.sum(mask) == 0:
-        cv2.rectangle(mask, (int(w*0.3), int(h*0.05)), (int(w*0.7), int(h*0.35)), 255, -1)
-
-    kernel = np.ones((15, 15), np.uint8)
-    mask_dilated = cv2.dilate(mask, kernel, iterations=1)
-    return Image.fromarray(mask_dilated).convert("L").filter(ImageFilter.GaussianBlur(radius=10))
-
-
-# ==========================================
-# 2. ENDPOINTS DE FASTAPI
-# ==========================================
 @app.get("/")
-def home():
-    return {"status": "Servidor VTON Completo Activo"}
+def read_root():
+    return {"status": "ok", "message": "API VTON Activa"}
 
 @app.post("/api/v1/try-on-completo")
-async def try_on_completo(
+async def try_on(
     foto_persona: UploadFile = File(...),
     prenda_top: UploadFile = File(...),
-    prenda_bottom: UploadFile = File(...)
+    prenda_bottom: UploadFile = File(...),
+    # Opcionales para talle y ajustes
+    categoria: str = Form("tops"),       # 'tops', 'bottoms' o 'dresses'
+    talle_largo: bool = Form(False)      # True si es prenda holgada/larga
 ):
     try:
-        session_id = str(uuid.uuid4())
-        persona_path = f"{OS_TEMP_DIR}/{session_id}_persona.jpg"
-        top_path = f"{OS_TEMP_DIR}/{session_id}_top.jpg"
-        bottom_path = f"{OS_TEMP_DIR}/{session_id}_bottom.jpg"
-        final_output_path = f"{OS_TEMP_DIR}/{session_id}_final.png"
+        token = os.getenv("HF_TOKEN")
+        
+        persona_path = "temp_person.jpg"
+        top_path = "temp_top.jpg"
+        
+        with open(persona_path, "wb") as f:
+            f.write(await foto_persona.read())
+        with open(top_path, "wb") as f:
+            f.write(await prenda_top.read())
 
-        # Guardar imágenes recibidas de la app
-        with open(persona_path, "wb") as buffer:
-            shutil.copyfileobj(foto_persona.file, buffer)
-        with open(top_path, "wb") as buffer:
-            shutil.copyfileobj(prenda_top.file, buffer)
-        with open(bottom_path, "wb") as buffer:
-            shutil.copyfileobj(prenda_bottom.file, buffer)
+        client = Client("fashn-ai/fashn-vton-1-5", hf_token=token)
 
-        persona_orig = Image.open(persona_path).convert("RGB")
-
-        # A. Crear la máscara del rostro para protección al final
-        mascara_rostro = obtener_mascara_rostro(persona_orig)
-
-        # B. Conectar con Hugging Face (pasando el token si existe)
-        client = Client(HF_SPACE_URL, hf_token=HF_TOKEN)
-
-        # C. PASO 1: Procesar Prenda Superior (Top)
-        res_step1_path = client.predict(
-            model_input={"background": persona_path, "layers": [], "composite": None},
-            garm_img=top_path,
-            garment_des="top",
-            is_checked=True,
-            is_checked_crop=False,
-            denoise_steps=30,
+        # Llamada con protección de rostro y parámetros de talle
+        result = client.predict(
+            model_image=handle_file(persona_path),
+            garment_image=handle_file(top_path),
+            category=categoria,          # Control de talle/tipo
+            nsfw_filter=True,
+            cover_feet=False,
+            adjust_hands=True,           # Ajuste de manos frente a la prenda
+            restore_background=True,     # PROTECCIÓN DE ROSTRO Y FONDO ORIGINAL
+            restore_clothes=False,
+            long_top=talle_largo,        # Ajuste para prendas largas/holgadas
+            guidance_scale=2.5,
+            timesteps=30,
             seed=42,
-            api_name="/process"
+            num_samples=1,
+            api_name="/process_tryon"
         )
 
-        # D. PASO 2: Procesar Prenda Inferior (Bottom) usando el resultado del Paso 1
-        res_step2_path = client.predict(
-            model_input={"background": res_step1_path, "layers": [], "composite": None},
-            garm_img=bottom_path,
-            garment_des="bottom",
-            is_checked=True,
-            is_checked_crop=False,
-            denoise_steps=30,
-            seed=42,
-            api_name="/process"
-        )
+        image_path = result[0]['image'] if isinstance(result, list) else result
 
-        # E. PASO 3: Restauración Facial
-        res_step2_pil = Image.open(res_step2_path).convert("RGB")
-        resultado_final = Image.composite(persona_orig, res_step2_pil, mascara_rostro)
-        resultado_final.save(final_output_path)
+        with open(image_path, "rb") as f:
+            image_bytes = f.read()
 
-        # Retornar la imagen final a la App Móvil
-        return FileResponse(final_output_path, media_type="image/png")
+        return Response(content=image_bytes, media_type="image/jpeg")
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error en procesamiento VTON: {str(e)}")
+        print(f"Error en backend: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error en procesamiento: {str(e)}")
