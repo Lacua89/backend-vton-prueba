@@ -38,7 +38,7 @@ async def try_on(
         # Conexión al Space Kwai-Kolors
         client = Client("Kwai-Kolors/Kolors-Virtual-Try-On", token=hf_token)
 
-        # Se especifica fn_index=0 para seleccionar la función principal de la app
+        # Ejecutamos el fn_index=0
         result = client.predict(
             handle_file(persona_path),
             handle_file(top_path),
@@ -47,7 +47,24 @@ async def try_on(
             fn_index=0
         )
 
-        image_path = result[0] if isinstance(result, (list, tuple)) else result
+        print(f"Respuesta cruda de Gradio: {result}")
+
+        # Extracción segura de la ruta de la imagen
+        image_path = None
+
+        if isinstance(result, (list, tuple)) and len(result) > 0:
+            item = result[0]
+            if isinstance(item, dict) and "image" in item:
+                image_path = item["image"]
+            elif isinstance(item, str):
+                image_path = item
+        elif isinstance(result, dict) and "image" in result:
+            image_path = result["image"]
+        elif isinstance(result, str):
+            image_path = result
+
+        if not image_path or not os.path.exists(str(image_path)):
+            raise Exception(f"No se pudo obtener la imagen del modelo. Respuesta obtenida: {result}")
 
         with open(image_path, "rb") as f:
             image_bytes = f.read()
