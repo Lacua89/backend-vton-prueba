@@ -3,7 +3,6 @@ from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from gradio_client import Client, handle_file
-from PIL import Image
 
 app = FastAPI()
 
@@ -17,7 +16,7 @@ app.add_middleware(
 
 @app.get("/")
 def read_root():
-    return {"status": "ok", "message": "API VTON Activa"}
+    return {"status": "ok", "message": "API VTON Gratis Activa (Paso 1 + Paso 2)"}
 
 @app.post("/api/v1/try-on-completo")
 async def try_on(
@@ -31,9 +30,8 @@ async def try_on(
         persona_path = "temp_person.jpg"
         top_path = "temp_top.jpg"
         bottom_path = "temp_bottom.jpg"
-        combined_path = "temp_outfit_combined.jpg"
         
-        # 1. Guardar archivos de entrada
+        # 1. Guardar archivos locales
         with open(persona_path, "wb") as f:
             f.write(await foto_persona.read())
         with open(top_path, "wb") as f:
@@ -41,42 +39,47 @@ async def try_on(
         with open(bottom_path, "wb") as f:
             f.write(await prenda_bottom.read())
 
-        # 2. Combinar ambas prendas verticalmente con PIL
-        top_img = Image.open(top_path).convert("RGB")
-        bottom_img = Image.open(bottom_path).convert("RGB")
+        # -------------------------------------------------------------
+        # PASO 1: Vestir la prenda Superior (Top) usando IDM-VTON
+        # -------------------------------------------------------------
+        print("Iniciando Paso 1: Procesando Prenda Superior...")
+        client_top = Client("yisol/IDM-VTON", token=hf_token)
 
-        target_width = max(top_img.width, bottom_img.width)
-        
-        if top_img.width != target_width:
-            new_height = int(top_img.height * (target_width / top_img.width))
-            top_img = top_img.resize((target_width, new_height), Image.Resampling.LANCZOS)
-            
-        if bottom_img.width != target_width:
-            new_height = int(bottom_img.height * (target_width / bottom_img.width))
-            bottom_img = bottom_img.resize((target_width, new_height), Image.Resampling.LANCZOS)
-
-        total_height = top_img.height + bottom_img.height
-        combined_outfit = Image.new("RGB", (target_width, total_height), (255, 255, 255))
-        combined_outfit.paste(top_img, (0, 0))
-        combined_outfit.paste(bottom_img, (0, top_img.height))
-        combined_outfit.save(combined_path, "JPEG", quality=95)
-
-        # 3. Conexión al Space activo xiaozaa/cat-vton
-        client = Client("xiaozaa/cat-vton", token=hf_token)
-
-        # 4. Llamada pasando cloth_type="overall" para abarcar torso y piernas
-        res = client.predict(
-            person_image=handle_file(persona_path),
-            garment_image=handle_file(combined_path),
-            cloth_type="overall",
-            num_inference_steps=30,
-            guidance_scale=2.5,
+        res_top = client_top.predict(
+            dict={
+                "background": handle_file(persona_path),
+                "layers": [],
+                "composite": handle_file(persona_path)
+            },
+            garm_img=handle_file(top_path),
+            garment_des="upper body clothing",
+            is_checked=True,
+            is_checked_crop=False,
+            denoise_steps=30,
             seed=42,
-            api_name="/submit"
+            api_name="/tryon"
         )
 
-        final_path = res[0] if isinstance(res, (list, tuple)) else res
+        top_result_path = res_top[0] if isinstance(res_top, (list, tuple)) else res_top
+        print(f"Paso 1 completado. Resultado guardado en: {top_result_path}")
 
+        # -------------------------------------------------------------
+        # PASO 2: Vestir la prenda Inferior (Bottom) usando Kolors-VTON
+        # -------------------------------------------------------------
+        print("Iniciando Paso 2: Procesando Prenda Inferior...")
+        client_bottom = Client("Kwai-Kolors/Kolors-Virtual-Try-On", token=hf_token)
+
+        res_bottom = client_bottom.predict(
+            person_img=handle_file(top_result_path),
+            garment_img=handle_file(bottom_path),
+            seed=0,
+            randomize_seed=True
+        )
+
+        final_path = res_bottom[0] if isinstance(res_bottom, (list, tuple)) else res_bottom
+        print("Paso 2 completado exitosamente.")
+
+        # 3. Leer y responder con la foto con ambas prendas aplicadas
         with open(final_path, "rb") as f:
             image_bytes = f.read()
 
@@ -84,4 +87,4 @@ async def try_on(
 
     except Exception as e:
         print(f"Error en backend: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error en procesamiento: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error en procesamiento en 2 pasos: {str(e)}")
