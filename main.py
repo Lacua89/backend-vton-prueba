@@ -41,7 +41,7 @@ async def try_on(
         with open(bottom_path, "wb") as f:
             f.write(await prenda_bottom.read())
 
-        # 2. Combinar ambas prendas verticalmente con PIL
+        # 2. Unir imágenes con PIL
         top_img = Image.open(top_path).convert("RGB")
         bottom_img = Image.open(bottom_path).convert("RGB")
 
@@ -57,28 +57,21 @@ async def try_on(
 
         total_height = top_img.height + bottom_img.height
         combined_outfit = Image.new("RGB", (target_width, total_height), (255, 255, 255))
-        
         combined_outfit.paste(top_img, (0, 0))
         combined_outfit.paste(bottom_img, (0, top_img.height))
         combined_outfit.save(combined_path, "JPEG", quality=95)
 
-        # 3. Conexión al Space oficial activo IDM-VTON
-        client = Client("yisol/IDM-VTON", token=hf_token)
+        # 3. Llamada a Cat-VTON (Soporta sustitución de cuerpo completo)
+        client = Client("zhengchong/Cat-VTON", token=hf_token)
 
-        # 4. Procesar con la etiqueta explícita de "overall" / ropa completa
         res = client.predict(
-            dict={
-                "background": handle_file(persona_path),
-                "layers": [],
-                "composite": handle_file(persona_path)
-            },
+            image=handle_file(persona_path),
             garm_img=handle_file(combined_path),
-            garment_des="overall dress outfit including top shirt and bottom pants",
-            is_checked=True,
-            is_checked_crop=False,
-            denoise_steps=30,
+            cloth_type="overall",  # Permite vestir torso y piernas sin cortar en cintura
+            num_inference_steps=30,
+            guidance_scale=2.5,
             seed=42,
-            api_name="/tryon"
+            api_name="/submit"
         )
 
         final_path = res[0] if isinstance(res, (list, tuple)) else res
