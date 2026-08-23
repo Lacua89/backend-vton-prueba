@@ -35,18 +35,18 @@ async def try_on(
         with open(top_path, "wb") as f:
             f.write(await prenda_top.read())
 
-        # Conectar al Space de Kolors
+        # Conexión al Space Kwai-Kolors
         client = Client("Kwai-Kolors/Kolors-Virtual-Try-On", token=hf_token)
 
-        # Llamar a la API omitiendo api_name para que ejecute la función por defecto
+        # Se especifica fn_index=0 para seleccionar la función principal de la app
         result = client.predict(
-            person_img=handle_file(persona_path),
-            garment_img=handle_file(top_path),
-            seed=0,
-            randomize_seed=True
+            handle_file(persona_path),
+            handle_file(top_path),
+            0,     # seed
+            True,  # randomize_seed
+            fn_index=0
         )
 
-        # Extraer la imagen devuelta por Gradio
         image_path = result[0] if isinstance(result, (list, tuple)) else result
 
         with open(image_path, "rb") as f:
