@@ -16,7 +16,7 @@ OS_TEMP_DIR = "./temp"
 os.makedirs(OS_TEMP_DIR, exist_ok=True)
 
 HF_SPACE_URL = "fashn-ai/fashn-vton-1.5"
-HF_TOKEN = None  # Ejemplo: "hf_xxxxxxxxxxxxxxxxxxxx"
+HF_TOKEN = None  # Ejemplo: "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"
 
 
 # ==========================================
