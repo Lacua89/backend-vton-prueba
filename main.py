@@ -16,7 +16,7 @@ app.add_middleware(
 
 @app.get("/")
 def read_root():
-    return {"status": "ok", "message": "API VTON Gratis Activa (OOTDiffusion Bottom -> IDM-VTON Top)"}
+    return {"status": "ok", "message": "API VTON Gratis Activa (OOTDiffusion Bottom -> IDM-VTON Crop Top)"}
 
 @app.post("/api/v1/try-on-completo")
 async def try_on(
@@ -50,8 +50,8 @@ async def try_on(
             garm_img=handle_file(bottom_path),
             category="Lower-body",
             n_samples=1,
-            n_steps=35,        # <--- Sube de 20 a 35 para reducir distorsiones
-            image_scale=3.0,   # <--- Sube de 2.0 a 3.0 para adherir mejor la forma
+            n_steps=35,
+            image_scale=3.0,
             seed=42,
             api_name="/process_dc"
         )
@@ -76,21 +76,21 @@ async def try_on(
         print(f"Paso 1 completado. Imagen con prenda inferior guardada en: {bottom_result_path}")
 
         # -------------------------------------------------------------
-        # PASO 2: Procesar Prenda Superior (Top) con IDM-VTON
+        # PASO 2: Procesar Prenda Superior (Top) con IDM-VTON y Recorte
         # -------------------------------------------------------------
-        print("Iniciando Paso 2: Procesando Prenda Superior con IDM-VTON...")
+        print("Iniciando Paso 2: Procesando Prenda Superior con IDM-VTON (Crop activado)...")
         client_top = Client("yisol/IDM-VTON", token=hf_token)
 
         res_top = client_top.predict(
             dict={
-                "background": handle_file(bottom_result_path), # <--- Usa el resultado del Paso 1
+                "background": handle_file(bottom_result_path),
                 "layers": [],
                 "composite": handle_file(bottom_result_path)
             },
             garm_img=handle_file(top_path),
             garment_des="upper body clothing",
             is_checked=True,
-            is_checked_crop=False,
+            is_checked_crop=True,  # <--- Recorta y enfoca la persona para no distorsionar el entorno
             denoise_steps=30,
             seed=42,
             api_name="/tryon"
@@ -99,7 +99,7 @@ async def try_on(
         final_path = res_top[0] if isinstance(res_top, (list, tuple)) else res_top
         print(f"Paso 2 completado. Imagen final guardada en: {final_path}")
 
-        # 3. Leer y responder con la imagen final de ambas prendas
+        # 3. Leer y responder con la imagen final
         with open(final_path, "rb") as f:
             image_bytes = f.read()
 
