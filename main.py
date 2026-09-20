@@ -16,7 +16,7 @@ app.add_middleware(
 
 @app.get("/")
 def read_root():
-    return {"status": "ok", "message": "API VTON Gratis Activa (IDM + OOTDiffusion)"}
+    return {"status": "ok", "message": "API VTON Gratis Activa (OOTDiffusion Bottom -> IDM-VTON Top)"}
 
 @app.post("/api/v1/try-on-completo")
 async def try_on(
@@ -31,7 +31,7 @@ async def try_on(
         top_path = "temp_top.jpg"
         bottom_path = "temp_bottom.jpg"
         
-        # 1. Guardar archivos locales
+        # 1. Guardar archivos locales temporales
         with open(persona_path, "wb") as f:
             f.write(await foto_persona.read())
         with open(top_path, "wb") as f:
@@ -40,16 +40,52 @@ async def try_on(
             f.write(await prenda_bottom.read())
 
         # -------------------------------------------------------------
-        # PASO 1: Vestir la prenda Superior (Top) usando IDM-VTON
+        # PASO 1: Procesar Prenda Inferior (Bottom) con OOTDiffusion
         # -------------------------------------------------------------
-        print("Iniciando Paso 1: Procesando Prenda Superior con IDM-VTON...")
+        print("Iniciando Paso 1: Procesando Prenda Inferior con OOTDiffusion...")
+        client_bottom = Client("levihsu/OOTDiffusion", token=hf_token)
+
+        res_bottom = client_bottom.predict(
+            vton_img=handle_file(persona_path),
+            garm_img=handle_file(bottom_path),
+            category="Lower-body",
+            n_samples=1,
+            n_steps=35,        # <--- Sube de 20 a 35 para reducir distorsiones
+            image_scale=3.0,   # <--- Sube de 2.0 a 3.0 para adherir mejor la forma
+            seed=42,
+            api_name="/process_dc"
+        )
+
+        # Extraer la ruta devuelta por OOTDiffusion
+        bottom_result_path = None
+
+        if isinstance(res_bottom, (list, tuple)) and len(res_bottom) > 0:
+            item = res_bottom[0]
+            if isinstance(item, dict):
+                bottom_result_path = item.get("image") or item.get("name") or item.get("path")
+            elif isinstance(item, str):
+                bottom_result_path = item
+        elif isinstance(res_bottom, dict):
+            bottom_result_path = res_bottom.get("image") or res_bottom.get("name") or res_bottom.get("path")
+        elif isinstance(res_bottom, str):
+            bottom_result_path = res_bottom
+
+        if not bottom_result_path or not os.path.exists(str(bottom_result_path)):
+            raise Exception(f"No se pudo resolver la ruta del Paso 1 (Bottom). Respuesta: {res_bottom}")
+
+        print(f"Paso 1 completado. Imagen con prenda inferior guardada en: {bottom_result_path}")
+
+        # -------------------------------------------------------------
+        # PASO 2: Procesar Prenda Superior (Top) con IDM-VTON
+        # -------------------------------------------------------------
+        print("Iniciando Paso 2: Procesando Prenda Superior con IDM-VTON...")
         client_top = Client("yisol/IDM-VTON", token=hf_token)
 
         res_top = client_top.predict(
             dict={
-                "background": handle_file(persona_path),
+                "background": handle_file(bottom_result_path), # <--- Usa el resultado del Paso 1
                 "layers": [],
-                "composite": handle_file(persona_path)
+                "composite": handle_file(bottom_result_path)
             },
             garm_img=handle_file(top_path),
             garment_des="upper body clothing",
@@ -60,48 +96,10 @@ async def try_on(
             api_name="/tryon"
         )
 
-        top_result_path = res_top[0] if isinstance(res_top, (list, tuple)) else res_top
-        print(f"Paso 1 completado. Resultado guardado en: {top_result_path}")
+        final_path = res_top[0] if isinstance(res_top, (list, tuple)) else res_top
+        print(f"Paso 2 completado. Imagen final guardada en: {final_path}")
 
-        # -------------------------------------------------------------
-        # PASO 2: Vestir la prenda Inferior (Bottom) usando OOTDiffusion
-        # -------------------------------------------------------------
-        print("Iniciando Paso 2: Procesando Prenda Inferior con OOTDiffusion...")
-        client_bottom = Client("levihsu/OOTDiffusion", token=hf_token)
-
-        res_bottom = client_bottom.predict(
-            vton_img=handle_file(top_result_path),
-            garm_img=handle_file(bottom_path),
-            category="Lower-body",
-            n_samples=1,
-            n_steps=20,
-            image_scale=2.0,
-            seed=42,
-            api_name="/process_dc"
-        )
-
-        print(f"Respuesta de OOTDiffusion: {res_bottom}")
-
-        # Extraer la ruta física del archivo independientemente del formato devuelto
-        final_path = None
-
-        if isinstance(res_bottom, (list, tuple)) and len(res_bottom) > 0:
-            item = res_bottom[0]
-            if isinstance(item, dict):
-                final_path = item.get("image") or item.get("name") or item.get("path")
-            elif isinstance(item, str):
-                final_path = item
-        elif isinstance(res_bottom, dict):
-            final_path = res_bottom.get("image") or res_bottom.get("name") or res_bottom.get("path")
-        elif isinstance(res_bottom, str):
-            final_path = res_bottom
-
-        if not final_path or not os.path.exists(str(final_path)):
-            raise Exception(f"No se pudo resolver la ruta de la imagen final. Respuesta: {res_bottom}")
-
-        print(f"Ruta obtenida con éxito: {final_path}")
-
-        # 3. Leer y responder con la imagen final
+        # 3. Leer y responder con la imagen final de ambas prendas
         with open(final_path, "rb") as f:
             image_bytes = f.read()
 
