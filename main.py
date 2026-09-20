@@ -16,7 +16,7 @@ app.add_middleware(
 
 @app.get("/")
 def read_root():
-    return {"status": "ok", "message": "API VTON Gratis Activa (IDM Top -> Cat-VTON Bottom)"}
+    return {"status": "ok", "message": "API VTON Gratis Activa (IDM Top -> Cat-VTON Bottom Alternativo)"}
 
 @app.post("/api/v1/try-on-completo")
 async def try_on(
@@ -64,45 +64,58 @@ async def try_on(
         print(f"Paso 1 completado: {top_result_path}")
 
         # -------------------------------------------------------------
-        # PASO 2: Procesar Prenda Inferior (Bottom) con Cat-VTON (Kwai-Kolors/Cat-VTON)
+        # PASO 2: Procesar Prenda Inferior (Bottom) con Cat-VTON (Nymbo/Cat-VTON)
+        # Intentamos con un Space alternativo que suele ser más estable
         # -------------------------------------------------------------
-        print("Iniciando Paso 2: Procesando Prenda Inferior con Cat-VTON...")
-        client_bottom = Client("Kwai-Kolors/Cat-VTON", token=hf_token)
+        print("Iniciando Paso 2: Procesando Prenda Inferior con Cat-VTON (Nymbo)...")
+        
+        try:
+            # Reemplazamos Kwai-Kolors por Nymbo
+            client_bottom = Client("Nymbo/Cat-VTON", token=hf_token)
 
-        res_bottom = client_bottom.predict(
-            person_image=handle_file(top_result_path),
-            garment_image=handle_file(bottom_path),
-            cloth_type="lower_body",
-            num_inference_steps=30,
-            guidance_scale=2.5,
-            seed=42,
-            api_name="/submit"
-        )
+            res_bottom = client_bottom.predict(
+                person_image=handle_file(top_result_path),
+                garment_image=handle_file(bottom_path),
+                cloth_type="lower_body",
+                num_inference_steps=30,
+                guidance_scale=2.5,
+                seed=42,
+                api_name="/submit"
+            )
 
-        # Extraer ruta física
-        final_path = None
-        if isinstance(res_bottom, (list, tuple)) and len(res_bottom) > 0:
-            item = res_bottom[0]
-            if isinstance(item, dict):
-                final_path = item.get("image") or item.get("name") or item.get("path")
-            elif isinstance(item, str):
-                final_path = item
-        elif isinstance(res_bottom, dict):
-            final_path = res_bottom.get("image") or res_bottom.get("name") or res_bottom.get("path")
-        elif isinstance(res_bottom, str):
-            final_path = res_bottom
+            # Extraer ruta física
+            final_path = None
+            if isinstance(res_bottom, (list, tuple)) and len(res_bottom) > 0:
+                item = res_bottom[0]
+                if isinstance(item, dict):
+                    final_path = item.get("image") or item.get("name") or item.get("path")
+                elif isinstance(item, str):
+                    final_path = item
+            elif isinstance(res_bottom, dict):
+                final_path = res_bottom.get("image") or res_bottom.get("name") or res_bottom.get("path")
+            elif isinstance(res_bottom, str):
+                final_path = res_bottom
 
-        if not final_path or not os.path.exists(str(final_path)):
-            raise Exception(f"No se pudo resolver la ruta final en Cat-VTON: {res_bottom}")
+            if not final_path or not os.path.exists(str(final_path)):
+                raise Exception(f"No se pudo resolver la ruta final en Cat-VTON (Nymbo): {res_bottom}")
 
-        print(f"Paso 2 completado exitosamente: {final_path}")
+            print(f"Paso 2 completado exitosamente: {final_path}")
 
-        # 3. Responder con la imagen final
-        with open(final_path, "rb") as f:
-            image_bytes = f.read()
+            # 3. Responder con la imagen final
+            with open(final_path, "rb") as f:
+                image_bytes = f.read()
 
-        return Response(content=image_bytes, media_type="image/jpeg")
+            return Response(content=image_bytes, media_type="image/jpeg")
+
+        except Exception as e_bottom:
+            print(f"Error en Paso 2 (Cat-VTON Alternativo): {str(e_bottom)}")
+            # Si falla el paso 2, devolvemos el resultado del paso 1 para no perder todo el proceso
+            # y que el usuario vea al menos la prenda superior.
+            print("Devolviendo resultado parcial del Paso 1 debido a error en Paso 2.")
+            with open(top_result_path, "rb") as f:
+                image_bytes = f.read()
+            return Response(content=image_bytes, media_type="image/jpeg", headers={"X-VTON-Warning": "Solo se proceso la prenda superior debido a un error técnico."})
 
     except Exception as e:
-        print(f"Error en backend: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error en procesamiento en 2 pasos: {str(e)}")
+        print(f"Error crítico en backend: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error en procesamiento: {str(e)}")
