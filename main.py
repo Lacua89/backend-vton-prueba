@@ -16,7 +16,7 @@ app.add_middleware(
 
 @app.get("/")
 def read_root():
-    return {"status": "ok", "message": "API VTON Gratis Activa (IDM Top -> Cat-VTON Bottom Alternativo)"}
+    return {"status": "ok", "message": "API VTON Gratis Activa (IDM Top Crop -> OOT Bottom LongFix)"}
 
 @app.post("/api/v1/try-on-completo")
 async def try_on(
@@ -54,7 +54,7 @@ async def try_on(
             garm_img=handle_file(top_path),
             garment_des="upper body clothing",
             is_checked=True,
-            is_checked_crop=True,
+            is_checked_crop=True, # Mantenemos el crop para limpiar el fondo
             denoise_steps=30,
             seed=42,
             api_name="/tryon"
@@ -64,23 +64,24 @@ async def try_on(
         print(f"Paso 1 completado: {top_result_path}")
 
         # -------------------------------------------------------------
-        # PASO 2: Procesar Prenda Inferior (Bottom) con Cat-VTON (Nymbo/Cat-VTON)
-        # Intentamos con un Space alternativo que suele ser más estable
+        # PASO 2: Procesar Prenda Inferior (Bottom) con OOTDiffusion (Optimizado para Largo)
+        # Volvemos a OOTDiffusion porque Cat-VTON Spaces estan caidos, pero con tweaks.
         # -------------------------------------------------------------
-        print("Iniciando Paso 2: Procesando Prenda Inferior con Cat-VTON (Nymbo)...")
+        print("Iniciando Paso 2: Procesando Prenda Inferior con OOTDiffusion (LongFix)...")
         
         try:
-            # Reemplazamos Kwai-Kolors por Nymbo
-            client_bottom = Client("Nymbo/Cat-VTON", token=hf_token)
+            client_bottom = Client("levihsu/OOTDiffusion", token=hf_token)
 
             res_bottom = client_bottom.predict(
-                person_image=handle_file(top_result_path),
-                garment_image=handle_file(bottom_path),
-                cloth_type="lower_body",
-                num_inference_steps=30,
-                guidance_scale=2.5,
+                vton_img=handle_file(top_result_path), # Usamos el resultado del Paso 1
+                garm_img=handle_file(bottom_path),
+                category="Lower-body",
+                n_samples=1,
+                n_steps=35,        # Pasos altos para calidad
+                image_scale=1.5,   # <--- CLAVE: Bajamos la escala (de 3.0 a 1.5). 
+                                  # Esto le da mas libertad a la IA para extender el pantalon hacia abajo.
                 seed=42,
-                api_name="/submit"
+                api_name="/process_dc"
             )
 
             # Extraer ruta física
@@ -97,24 +98,23 @@ async def try_on(
                 final_path = res_bottom
 
             if not final_path or not os.path.exists(str(final_path)):
-                raise Exception(f"No se pudo resolver la ruta final en Cat-VTON (Nymbo): {res_bottom}")
+                raise Exception(f"No se pudo resolver la ruta final en OOTDiffusion: {res_bottom}")
 
             print(f"Paso 2 completado exitosamente: {final_path}")
 
-            # 3. Responder con la imagen final
+            # 3. Responder con la imagen final combinada
             with open(final_path, "rb") as f:
                 image_bytes = f.read()
 
             return Response(content=image_bytes, media_type="image/jpeg")
 
         except Exception as e_bottom:
-            print(f"Error en Paso 2 (Cat-VTON Alternativo): {str(e_bottom)}")
-            # Si falla el paso 2, devolvemos el resultado del paso 1 para no perder todo el proceso
-            # y que el usuario vea al menos la prenda superior.
+            print(f"Error en Paso 2 (OOTDiffusion Optimizado): {str(e_bottom)}")
+            # Mantenemos la contingencia: si falla el pantalon, devolvemos al menos la remera.
             print("Devolviendo resultado parcial del Paso 1 debido a error en Paso 2.")
             with open(top_result_path, "rb") as f:
                 image_bytes = f.read()
-            return Response(content=image_bytes, media_type="image/jpeg", headers={"X-VTON-Warning": "Solo se proceso la prenda superior debido a un error técnico."})
+            return Response(content=image_bytes, media_type="image/jpeg", headers={"X-VTON-Warning": "Solo se proceso la prenda superior debido a un error técnico en la prenda inferior."})
 
     except Exception as e:
         print(f"Error crítico en backend: {str(e)}")
