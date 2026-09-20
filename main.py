@@ -16,7 +16,7 @@ app.add_middleware(
 
 @app.get("/")
 def read_root():
-    return {"status": "ok", "message": "API VTON Gratis Activa (IDM Top Crop -> OOTBottom)"}
+    return {"status": "ok", "message": "API VTON Gratis Activa (IDM Top -> Cat-VTON Bottom)"}
 
 @app.post("/api/v1/try-on-completo")
 async def try_on(
@@ -42,7 +42,7 @@ async def try_on(
         # -------------------------------------------------------------
         # PASO 1: Procesar Prenda Superior (Top) con IDM-VTON + Crop
         # -------------------------------------------------------------
-        print("Iniciando Paso 1: Procesando Prenda Superior con IDM-VTON (Crop activado)...")
+        print("Iniciando Paso 1: Procesando Prenda Superior con IDM-VTON...")
         client_top = Client("yisol/IDM-VTON", token=hf_token)
 
         res_top = client_top.predict(
@@ -54,35 +54,34 @@ async def try_on(
             garm_img=handle_file(top_path),
             garment_des="upper body clothing",
             is_checked=True,
-            is_checked_crop=True,  # <--- Recorta el encuadre centrándose en la persona desde el inicio
+            is_checked_crop=True,
             denoise_steps=30,
             seed=42,
             api_name="/tryon"
         )
 
         top_result_path = res_top[0] if isinstance(res_top, (list, tuple)) else res_top
-        print(f"Paso 1 completado. Imagen recortada y vestida arriba guardada en: {top_result_path}")
+        print(f"Paso 1 completado: {top_result_path}")
 
         # -------------------------------------------------------------
-        # PASO 2: Procesar Prenda Inferior (Bottom) con OOTDiffusion
+        # PASO 2: Procesar Prenda Inferior (Bottom) con Cat-VTON
+        # Cat-VTON respeta la longitud completa de los pantalones
         # -------------------------------------------------------------
-        print("Iniciando Paso 2: Procesando Prenda Inferior con OOTDiffusion...")
-        client_bottom = Client("levihsu/OOTDiffusion", token=hf_token)
+        print("Iniciando Paso 2: Procesando Prenda Inferior con Cat-VTON...")
+        client_bottom = Client("zhengchong/Cat-VTON", token=hf_token)
 
         res_bottom = client_bottom.predict(
-            vton_img=handle_file(top_result_path), # <--- Se pasa la imagen recortada del Paso 1
-            garm_img=handle_file(bottom_path),
-            category="Lower-body",
-            n_samples=1,
-            n_steps=35,
-            image_scale=3.0,
+            person_image=handle_file(top_result_path),
+            garment_image=handle_file(bottom_path),
+            cloth_type="lower_body",  # Mantiene la longitud natural de la prenda
+            num_inference_steps=30,
+            guidance_scale=2.5,
             seed=42,
-            api_name="/process_dc"
+            api_name="/submit"
         )
 
-        # Extraer la ruta devuelta por OOTDiffusion
+        # Extraer ruta física
         final_path = None
-
         if isinstance(res_bottom, (list, tuple)) and len(res_bottom) > 0:
             item = res_bottom[0]
             if isinstance(item, dict):
@@ -95,11 +94,11 @@ async def try_on(
             final_path = res_bottom
 
         if not final_path or not os.path.exists(str(final_path)):
-            raise Exception(f"No se pudo resolver la ruta de la imagen final. Respuesta: {res_bottom}")
+            raise Exception(f"No se pudo resolver la ruta final en Cat-VTON: {res_bottom}")
 
-        print(f"Paso 2 completado exitosamente. Resultado final: {final_path}")
+        print(f"Paso 2 completado exitosamente: {final_path}")
 
-        # 3. Leer y devolver la imagen final
+        # 3. Responder con la imagen final
         with open(final_path, "rb") as f:
             image_bytes = f.read()
 
