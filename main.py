@@ -64,16 +64,15 @@ async def try_on(
         print(f"Paso 1 completado: {top_result_path}")
 
         # -------------------------------------------------------------
-        # PASO 2: Procesar Prenda Inferior (Bottom) con Cat-VTON
-        # Cat-VTON respeta la longitud completa de los pantalones
+        # PASO 2: Procesar Prenda Inferior (Bottom) con Cat-VTON (Kwai-Kolors/Cat-VTON)
         # -------------------------------------------------------------
         print("Iniciando Paso 2: Procesando Prenda Inferior con Cat-VTON...")
-        client_bottom = Client("zhengchong/Cat-VTON", token=hf_token)
+        client_bottom = Client("Kwai-Kolors/Cat-VTON", token=hf_token)
 
         res_bottom = client_bottom.predict(
             person_image=handle_file(top_result_path),
             garment_image=handle_file(bottom_path),
-            cloth_type="lower_body",  # Mantiene la longitud natural de la prenda
+            cloth_type="lower_body",
             num_inference_steps=30,
             guidance_scale=2.5,
             seed=42,
