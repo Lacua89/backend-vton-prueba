@@ -18,7 +18,7 @@ app.add_middleware(
 
 @app.get("/")
 def read_root():
-    return {"status": "ok", "message": "API VTON Activa (IDM-VTON Full Outfit via Lacu89/IDM-VTON)"}
+    return {"status": "ok", "message": "API VTON Activa"}
 
 @app.post("/api/v1/try-on-completo")
 async def try_on(
@@ -36,7 +36,6 @@ async def try_on(
     try:
         hf_token = os.getenv("HF_TOKEN")
         
-        # Guardar imágenes de la petición localmente
         with open(persona_path, "wb") as f:
             f.write(await foto_persona.read())
         with open(top_path, "wb") as f:
@@ -49,7 +48,7 @@ async def try_on(
         # -------------------------------------------------------------
         # PASO 1: Prenda Superior (TOP)
         # -------------------------------------------------------------
-        print(f"[{req_id}] Paso 1: Procesando Prenda Superior (TOP)...")
+        print(f"[{req_id}] Paso 1: Procesando TOP...")
 
         res_top = client.predict(
             dict={
@@ -68,12 +67,11 @@ async def try_on(
         )
 
         top_result_path = res_top[0] if isinstance(res_top, (list, tuple)) else res_top
-        print(f"[{req_id}] Paso 1 completado.")
 
         # -------------------------------------------------------------
         # PASO 2: Prenda Inferior (BOTTOM)
         # -------------------------------------------------------------
-        print(f"[{req_id}] Paso 2: Procesando Prenda Inferior (BOTTOM)...")
+        print(f"[{req_id}] Paso 2: Procesando BOTTOM (Protegiendo calzado y entrepierna)...")
         
         try:
             res_bottom = client.predict(
@@ -83,11 +81,11 @@ async def try_on(
                     "composite": handle_file(top_result_path)
                 },
                 garm_img=handle_file(bottom_path),
-                garment_des="pants",           # Prompt conciso para no sobre-modificar
-                category="lower_body",
+                garment_des="pants, preserve shoes and footwear",
+                category="dresses",          # Cambiado a 'dresses' para conservar la segmentación de piernas/zapatos
                 is_checked=True,
                 is_checked_crop=False,
-                denoise_steps=25,              # Pasos reducidos para conservar calzado y piernas originales
+                denoise_steps=20,            # Fuerza a mantener la estructura base (zapatos/entrepierna)
                 seed=42,
                 api_name="/tryon"
             )
@@ -95,9 +93,7 @@ async def try_on(
             final_path = res_bottom[0] if isinstance(res_bottom, (list, tuple)) else res_bottom
 
             if not final_path or not os.path.exists(str(final_path)):
-                raise Exception(f"No se pudo obtener la ruta final: {res_bottom}")
-
-            print(f"[{req_id}] Paso 2 completado exitosamente.")
+                raise Exception("Error al obtener la ruta de la imagen generada.")
 
             with open(final_path, "rb") as f:
                 image_bytes = f.read()
@@ -105,22 +101,20 @@ async def try_on(
             return Response(content=image_bytes, media_type="image/jpeg")
 
         except Exception as e_bottom:
-            print(f"[{req_id}] Error en Paso 2: {str(e_bottom)}")
+            print(f"[{req_id}] Fallo en Paso 2: {str(e_bottom)}")
             with open(top_result_path, "rb") as f:
                 image_bytes = f.read()
                 
             return Response(
                 content=image_bytes, 
                 media_type="image/jpeg", 
-                headers={"X-VTON-Warning": "Se devolvió solo el TOP por falla en el pantalón."}
+                headers={"X-VTON-Warning": "Se devolvió resultado parcial del Paso 1."}
             )
 
     except Exception as e:
-        print(f"[{req_id}] Error general: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error en el servidor: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error en servidor: {str(e)}")
 
     finally:
-        # Limpieza de temporales
         for path in [persona_path, top_path, bottom_path]:
             if os.path.exists(path):
                 try:
