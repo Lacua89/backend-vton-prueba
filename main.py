@@ -50,57 +50,59 @@ async def try_on(
         with open(bottom_path, "wb") as f:
             f.write(await prenda_bottom.read())
 
-        # Instancia original del cliente Gradio
+        # Instancia del cliente Gradio
         client = Client("Lacu89/IDM-VTON", token=hf_token)
 
         # -------------------------------------------------------------
-        # PASO 1: Prenda Superior (TOP)
+        # PASO 1: Prenda Inferior (BOTTOM) - Se procesa primero
         # -------------------------------------------------------------
-        print(f"[{req_id}] Paso 1: Procesando Prenda Superior (TOP)...")
+        print(f"[{req_id}] Paso 1: Procesando Prenda Inferior (BOTTOM)...")
 
-        # ✅ Pasamos handle_file(persona_path) directamente sin el keyword 'dict='
-        res_top = client.predict(
+        res_bottom = client.predict(
             handle_file(persona_path),
-            garm_img=handle_file(top_path),
-            garment_des="top clothing",
-            category="upper_body",
+            garm_img=handle_file(bottom_path),
+            garment_des="a pair of pants, lower body garment, trousers",
+            category="lower_body",
             is_checked=True,
             is_checked_crop=False,
-            denoise_steps=30,
+            denoise_steps=35,
             seed=42,
             api_name="/tryon",
         )
 
-        top_result_path = (
-            res_top[0] if isinstance(res_top, (list, tuple)) else res_top
+        bottom_result_path = (
+            res_bottom[0] if isinstance(res_bottom, (list, tuple)) else res_bottom
         )
-        print(f"[{req_id}] Paso 1 completado.")
+
+        if not bottom_result_path or not os.path.exists(str(bottom_result_path)):
+            raise Exception(f"No se pudo obtener la imagen del BOTTOM: {res_bottom}")
+
+        print(f"[{req_id}] Paso 1 completado exitosamente.")
 
         # -------------------------------------------------------------
-        # PASO 2: Prenda Inferior (BOTTOM)
+        # PASO 2: Prenda Superior (TOP) - Se procesa sobre la imagen con BOTTOM
         # -------------------------------------------------------------
-        print(f"[{req_id}] Paso 2: Procesando Prenda Inferior (BOTTOM)...")
+        print(f"[{req_id}] Paso 2: Procesando Prenda Superior (TOP)...")
 
         try:
-            # ✅ Pasamos handle_file(top_result_path) directamente sin 'dict='
-            res_bottom = client.predict(
-                handle_file(top_result_path),
-                garm_img=handle_file(bottom_path),
-                garment_des="pants, lower body garment",
-                category="lower_body",
+            res_top = client.predict(
+                handle_file(bottom_result_path),
+                garm_img=handle_file(top_path),
+                garment_des="a top clothing, shirt, upper body garment",
+                category="upper_body",
                 is_checked=True,
                 is_checked_crop=False,
-                denoise_steps=28,
+                denoise_steps=30,
                 seed=42,
                 api_name="/tryon",
             )
 
             final_path = (
-                res_bottom[0] if isinstance(res_bottom, (list, tuple)) else res_bottom
+                res_top[0] if isinstance(res_top, (list, tuple)) else res_top
             )
 
             if not final_path or not os.path.exists(str(final_path)):
-                raise Exception(f"No se pudo obtener la ruta final: {res_bottom}")
+                raise Exception(f"No se pudo obtener la ruta final: {res_top}")
 
             print(f"[{req_id}] Paso 2 completado exitosamente.")
 
@@ -109,9 +111,10 @@ async def try_on(
 
             return Response(content=image_bytes, media_type="image/jpeg")
 
-        except Exception as e_bottom:
-            print(f"[{req_id}] Error en Paso 2: {str(e_bottom)}")
-            with open(top_result_path, "rb") as f:
+        except Exception as e_top:
+            print(f"[{req_id}] Error en Paso 2 (TOP): {str(e_top)}")
+            # Si falla el TOP, devolvemos al menos la imagen con el BOTTOM aplicado
+            with open(bottom_result_path, "rb") as f:
                 image_bytes = f.read()
 
             return Response(
@@ -119,7 +122,7 @@ async def try_on(
                 media_type="image/jpeg",
                 headers={
                     "X-VTON-Warning": (
-                        "Se devolvió solo el TOP por falla en el pantalón."
+                        "Se devolvió solo el BOTTOM por falla en la prenda superior."
                     )
                 },
             )
@@ -131,7 +134,7 @@ async def try_on(
         )
 
     finally:
-        # Limpieza de temporales
+        # Limpieza de archivos temporales
         for path in [persona_path, top_path, bottom_path]:
             if os.path.exists(path):
                 try:
