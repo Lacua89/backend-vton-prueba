@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from gradio_client import Client, handle_file
 
-# Silenciar los logs de red secundarios de Gradio/httpx (evita el spam de /heartbeat en consola)
+# Silenciar los logs de red secundarios de Gradio/httpx
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 app = FastAPI()
@@ -23,7 +23,7 @@ app.add_middleware(
 
 @app.get("/")
 def read_root():
-  return {"status": "ok", "message": "API VTON Activa"}
+    return {"status": "ok", "message": "API VTON Activa"}
 
 
 @app.post("/api/v1/try-on-completo")
@@ -32,115 +32,109 @@ async def try_on(
     prenda_top: UploadFile = File(...),
     prenda_bottom: UploadFile = File(...),
 ):
-  req_id = str(uuid.uuid4())[:8]
-  temp_dir = tempfile.gettempdir()
+    req_id = str(uuid.uuid4())[:8]
+    temp_dir = tempfile.gettempdir()
 
-  persona_path = os.path.join(temp_dir, f"{req_id}_person.jpg")
-  top_path = os.path.join(temp_dir, f"{req_id}_top.jpg")
-  bottom_path = os.path.join(temp_dir, f"{req_id}_bottom.jpg")
-
-  try:
-    hf_token = os.getenv("HF_TOKEN")
-
-    # Guardar imágenes de la petición localmente
-    with open(persona_path, "wb") as f:
-      f.write(await foto_persona.read())
-    with open(top_path, "wb") as f:
-      f.write(await prenda_top.read())
-    with open(bottom_path, "wb") as f:
-      f.write(await prenda_bottom.read())
-
-    # Instancia original del cliente Gradio
-    client = Client("Lacu89/IDM-VTON", token=hf_token)
-
-    # -------------------------------------------------------------
-    # PASO 1: Prenda Superior (TOP)
-    # -------------------------------------------------------------
-    print(f"[{req_id}] Paso 1: Procesando Prenda Superior (TOP)...")
-
-    res_top = client.predict(
-        dict={
-            "background": handle_file(persona_path),
-            "layers": [],
-            "composite": handle_file(persona_path),
-        },
-        garm_img=handle_file(top_path),
-        garment_des="top clothing",
-        category="upper_body",
-        is_checked=True,
-        is_checked_crop=False,
-        denoise_steps=30,
-        seed=42,
-        api_name="/tryon",
-    )
-
-    top_result_path = (
-        res_top[0] if isinstance(res_top, (list, tuple)) else res_top
-    )
-    print(f"[{req_id}] Paso 1 completado.")
-
-    # -------------------------------------------------------------
-    # PASO 2: Prenda Inferior (BOTTOM)
-    # -------------------------------------------------------------
-    print(f"[{req_id}] Paso 2: Procesando Prenda Inferior (BOTTOM)...")
+    persona_path = os.path.join(temp_dir, f"{req_id}_person.jpg")
+    top_path = os.path.join(temp_dir, f"{req_id}_top.jpg")
+    bottom_path = os.path.join(temp_dir, f"{req_id}_bottom.jpg")
 
     try:
-      res_bottom = client.predict(
-          dict={
-              "background": handle_file(top_result_path),
-              "layers": [],
-              "composite": handle_file(top_result_path),
-          },
-          garm_img=handle_file(bottom_path),
-          garment_des="pants, lower body garment",
-          category="lower_body",  # Mantenemos lower_body para trabajar con la nueva utils_mask.py
-          is_checked=True,
-          is_checked_crop=False,
-          denoise_steps=28,  # Pasos balanceados para no alterar calzado
-          seed=42,
-          api_name="/tryon",
-      )
+        hf_token = os.getenv("HF_TOKEN")
 
-      final_path = (
-          res_bottom[0] if isinstance(res_bottom, (list, tuple)) else res_bottom
-      )
+        # Guardar imágenes de la petición localmente
+        with open(persona_path, "wb") as f:
+            f.write(await foto_persona.read())
+        with open(top_path, "wb") as f:
+            f.write(await prenda_top.read())
+        with open(bottom_path, "wb") as f:
+            f.write(await prenda_bottom.read())
 
-      if not final_path or not os.path.exists(str(final_path)):
-        raise Exception(f"No se pudo obtener la ruta final: {res_bottom}")
+        # Instancia original del cliente Gradio
+        client = Client("Lacu89/IDM-VTON", token=hf_token)
 
-      print(f"[{req_id}] Paso 2 completado exitosamente.")
+        # -------------------------------------------------------------
+        # PASO 1: Prenda Superior (TOP)
+        # -------------------------------------------------------------
+        print(f"[{req_id}] Paso 1: Procesando Prenda Superior (TOP)...")
 
-      with open(final_path, "rb") as f:
-        image_bytes = f.read()
+        # ✅ Pasamos handle_file(persona_path) directamente sin el keyword 'dict='
+        res_top = client.predict(
+            handle_file(persona_path),
+            garm_img=handle_file(top_path),
+            garment_des="top clothing",
+            category="upper_body",
+            is_checked=True,
+            is_checked_crop=False,
+            denoise_steps=30,
+            seed=42,
+            api_name="/tryon",
+        )
 
-      return Response(content=image_bytes, media_type="image/jpeg")
+        top_result_path = (
+            res_top[0] if isinstance(res_top, (list, tuple)) else res_top
+        )
+        print(f"[{req_id}] Paso 1 completado.")
 
-    except Exception as e_bottom:
-      print(f"[{req_id}] Error en Paso 2: {str(e_bottom)}")
-      with open(top_result_path, "rb") as f:
-        image_bytes = f.read()
+        # -------------------------------------------------------------
+        # PASO 2: Prenda Inferior (BOTTOM)
+        # -------------------------------------------------------------
+        print(f"[{req_id}] Paso 2: Procesando Prenda Inferior (BOTTOM)...")
 
-      return Response(
-          content=image_bytes,
-          media_type="image/jpeg",
-          headers={
-              "X-VTON-Warning": (
-                  "Se devolvió solo el TOP por falla en el pantalón."
-              )
-          },
-      )
-
-  except Exception as e:
-    print(f"[{req_id}] Error general: {str(e)}")
-    raise HTTPException(
-        status_code=500, detail=f"Error en el servidor: {str(e)}"
-    )
-
-  finally:
-    # Limpieza de temporales
-    for path in [persona_path, top_path, bottom_path]:
-      if os.path.exists(path):
         try:
-          os.remove(path)
-        except Exception:
-          pass
+            # ✅ Pasamos handle_file(top_result_path) directamente sin 'dict='
+            res_bottom = client.predict(
+                handle_file(top_result_path),
+                garm_img=handle_file(bottom_path),
+                garment_des="pants, lower body garment",
+                category="lower_body",
+                is_checked=True,
+                is_checked_crop=False,
+                denoise_steps=28,
+                seed=42,
+                api_name="/tryon",
+            )
+
+            final_path = (
+                res_bottom[0] if isinstance(res_bottom, (list, tuple)) else res_bottom
+            )
+
+            if not final_path or not os.path.exists(str(final_path)):
+                raise Exception(f"No se pudo obtener la ruta final: {res_bottom}")
+
+            print(f"[{req_id}] Paso 2 completado exitosamente.")
+
+            with open(final_path, "rb") as f:
+                image_bytes = f.read()
+
+            return Response(content=image_bytes, media_type="image/jpeg")
+
+        except Exception as e_bottom:
+            print(f"[{req_id}] Error en Paso 2: {str(e_bottom)}")
+            with open(top_result_path, "rb") as f:
+                image_bytes = f.read()
+
+            return Response(
+                content=image_bytes,
+                media_type="image/jpeg",
+                headers={
+                    "X-VTON-Warning": (
+                        "Se devolvió solo el TOP por falla en el pantalón."
+                    )
+                },
+            )
+
+    except Exception as e:
+        print(f"[{req_id}] Error general: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Error en el servidor: {str(e)}"
+        )
+
+    finally:
+        # Limpieza de temporales
+        for path in [persona_path, top_path, bottom_path]:
+            if os.path.exists(path):
+                try:
+                    os.remove(path)
+                except Exception:
+                    pass
